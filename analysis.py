@@ -9,7 +9,6 @@ from typing import Optional, Tuple, Any, Dict, List
 
 # Suppress pandas warning for sep=None
 import warnings
-
 warnings.filterwarnings("ignore", "This regex is not supported by the 'python' engine")
 
 
@@ -18,10 +17,10 @@ class ImpedanceAnalyzer:
     Handles analysis for a SINGLE experiment/distance folder.
     (e.g., "1cm_100uApp")
     """
-
-    def __init__(self, experiment_dir: Path, output_dir: Path,
+    
+    def __init__(self, experiment_dir: Path, output_dir: Path, 
                  steak_size: float, z_limit: Optional[float] = None):
-
+        
         if not experiment_dir.is_dir():
             raise NotADirectoryError(f"Experiment directory not found: {experiment_dir}")
 
@@ -32,12 +31,12 @@ class ImpedanceAnalyzer:
         # Create structured output paths
         self.output_dir = output_dir
         self.plot_dir = self.output_dir / "plots"
-        self.csv_dir = self.output_dir / "csv_data"  # For summary CSVs
-
+        self.csv_dir = self.output_dir / "csv_data" # For summary CSVs
+        
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.plot_dir.mkdir(parents=True, exist_ok=True)
         self.csv_dir.mkdir(parents=True, exist_ok=True)
-
+        
         print(f"Analyzer initialized for: {self.experiment_dir.name}")
 
     def run_spec_to_csv_conversion(self) -> str:
@@ -46,7 +45,7 @@ class ImpedanceAnalyzer:
         files into sequentially named .csv files (0.0_nf, 0.1_nf, etc.).
         """
         print(f"  Processing: {self.experiment_dir.name}")
-
+        
         # --- START OF FIX: CLEANUP ---
         # First, find and delete all old, contaminated CSVs
         old_csvs = list(self.experiment_dir.rglob("*_nf.csv"))
@@ -58,24 +57,30 @@ class ImpedanceAnalyzer:
                 except Exception as e:
                     print(f"    Could not delete {f.name}: {e}")
         # --- END OF FIX: CLEANUP ---
-
+        
         # Find all .spec files, no matter how deep
         spec_files = sorted(list(self.experiment_dir.rglob("*.spec")))
         if not spec_files:
             print("    No .spec files found.")
             return "No .spec files found in this folder."
-
+        
         print(f"    Found {len(spec_files)} .spec files. Converting...")
 
         # Generate the new names based on the sort order (which is by timestamp)
-        new_names = [f"{round(i * 0.1, 1)}_nf.csv" for i in range(len(spec_files))]
-
+        new_names = [f"{round(i*0.1, 1)}_nf.csv" for i in range(len(spec_files))]
+        
         total_converted = 0
-
+        
         for spec_path, new_name in zip(spec_files, new_names):
-
+            
             # Save the new CSV in the *same folder* as the .spec file
             csv_path = spec_path.with_name(new_name)
+            
+            # --- THIS IS THE CHANGE ---
+            # We no longer check if the file exists. We will
+            # *always* overwrite. This is crucial for a web server.
+            # (Removed 'if csv_path.exists(): continue')
+            # --- END OF CHANGE ---
 
             try:
                 df = pd.read_csv(spec_path, sep=None, engine="python")
@@ -95,15 +100,12 @@ class ImpedanceAnalyzer:
         # Find ALL the .csv files we just created
         csv_files = sorted(list(self.experiment_dir.rglob("*_nf.csv")))
         if not csv_files:
-            raise FileNotFoundError(
-                f"No *_nf.csv files found in: {self.experiment_dir.name}. Did you run the conversion?")
+            raise FileNotFoundError(f"No *_nf.csv files found in: {self.experiment_dir.name}. Did you run the conversion?")
 
-        # --- This check ensures we only plot the 20 files, not extras ---
-        plot_data = []  # List of (capacitance, min_magnitude, freqs, magnitudes)
+        plot_data = [] # List of (capacitance, min_magnitude, freqs, magnitudes)
         for file in csv_files:
             cap_val = None
-
-            # --- Robust filter to get capacitance from name ---
+            
             if '_' not in file.name:
                 continue
             try:
@@ -111,12 +113,12 @@ class ImpedanceAnalyzer:
             except ValueError:
                 print(f"Skipping plot for file (could not parse cap): {file.name}")
                 continue
-
+            
             try:
                 df = pd.read_csv(file, skiprows=7)
                 freqs = df["frequency[Hz]"].values
-                mags = np.sqrt(df["Re[Ohm]"].values ** 2 + df["Im[Ohm]"].values ** 2)
-
+                mags = np.sqrt(df["Re[Ohm]"].values**2 + df["Im[Ohm]"].values**2)
+                
                 if self.z_limit:
                     mask = mags <= self.z_limit
                     freqs, mags = freqs[mask], mags[mask]
@@ -129,31 +131,26 @@ class ImpedanceAnalyzer:
 
         if not plot_data:
             raise ValueError(f"No valid data to plot in: {self.experiment_dir.name}")
-
-        # Sort data by capacitance
+        
         plot_data.sort(key=lambda x: x[0])
-
+        
         # --- Plot 1: |Z| vs. Frequency (All 20 scatters) ---
         fig_z_freq = plt.figure(figsize=(9, 5))
         ax1 = fig_z_freq.add_subplot(111)
         cmap = plt.get_cmap("viridis", len(plot_data))
-
+        
         for i, (cap, min_mag, freqs, mags, fname) in enumerate(plot_data):
-            ax1.scatter(freqs, mags, label=f"{cap} pF", color=cmap(i / len(plot_data)), s=3)
+            ax1.scatter(freqs, mags, label=f"{cap} pF", color=cmap(i/len(plot_data)), s=10)
 
         ax1.set_xlabel("Frequency (Hz)")
         ax1.set_ylabel("|Z| (Ω)")
         ax1.set_yscale("log")
         ax1.set_title(f"Impedance vs. Frequency for {self.experiment_dir.name}")
-        ax1.grid(True, which="both", linestyle="--", alpha=0.8)
-
-        # --- START OF LEGEND FIX ---
-        # Move legend outside the plot
+        ax1.grid(True, which="both", linestyle="--", alpha=0.5)
+        
         ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
-        # Manually make room for the legend
         fig_z_freq.subplots_adjust(right=0.75)
-        # --- END OF LEGEND FIX ---
-
+            
         fig_z_freq.savefig(self.plot_dir / f"{self.experiment_dir.name}_Z_vs_Freq.png")
 
         # --- Plot 2: Min |Z| vs. Capacitance (All 20 points) ---
@@ -162,15 +159,14 @@ class ImpedanceAnalyzer:
 
         fig_z_cap = plt.figure(figsize=(7, 5))
         ax2 = fig_z_cap.add_subplot(111)
-
-        ax2.plot(capacitances, min_magnitudes, 'bo', label="Min |Z|")
-
+        
+        ax2.plot(capacitances, min_magnitudes, 'bo', label="Min |Z|") 
+        
         ax2.set_xlabel("Capacitance (pF)")
         ax2.set_ylabel("Minimum |Z| (Ω)")
         ax2.set_title(f"Minimum Impedance vs. Capacitance for {self.experiment_dir.name}")
         ax2.grid(True, linestyle="--", alpha=0.7)
         fig_z_cap.tight_layout()
         fig_z_cap.savefig(self.plot_dir / f"{self.experiment_dir.name}_MinZ_vs_Cap.png")
-
-        # Return the two figures
+        
         return (fig_z_freq, fig_z_cap)
