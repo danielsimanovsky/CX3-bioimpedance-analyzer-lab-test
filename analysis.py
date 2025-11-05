@@ -140,7 +140,7 @@ class ImpedanceAnalyzer:
         cmap = plt.get_cmap("viridis", len(plot_data))
         
         for i, (cap, min_mag, freqs, mags, fname) in enumerate(plot_data):
-            ax1.scatter(freqs, mags, label=f"{cap} pF", color=cmap(i/len(plot_data)), s=10)
+            ax1.scatter(freqs, mags, label=f"{cap} nF", color=cmap(i/len(plot_data)), s=10)
 
         ax1.set_xlabel("Frequency (Hz)")
         ax1.set_ylabel("|Z| (Ω)")
@@ -162,7 +162,7 @@ class ImpedanceAnalyzer:
         
         ax2.plot(capacitances, min_magnitudes, 'bo', label="Min |Z|") 
         
-        ax2.set_xlabel("Capacitance (pF)")
+        ax2.set_xlabel("Capacitance (nF)")
         ax2.set_ylabel("Minimum |Z| (Ω)")
         ax2.set_title(f"Minimum Impedance vs. Capacitance for {self.experiment_dir.name}")
         ax2.grid(True, linestyle="--", alpha=0.7)
@@ -170,3 +170,4 @@ class ImpedanceAnalyzer:
         fig_z_cap.savefig(self.plot_dir / f"{self.experiment_dir.name}_MinZ_vs_Cap.png")
         
         return (fig_z_freq, fig_z_cap)
+
