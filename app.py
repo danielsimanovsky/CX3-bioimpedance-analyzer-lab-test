@@ -10,8 +10,8 @@ from collections import defaultdict
 from typing import Optional, List, Tuple
 
 # --- New libraries for unzipping in memory ---
-import zipFile
-import tempFile 
+import zipfile
+import tempfile 
 
 # Import your backend class
 try:
@@ -235,13 +235,13 @@ if not uploaded_file:
 
 if run_button:
     # --- This 'with' block creates a secure, temporary folder ---
-    with tempFile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
         
         # 1. Unzip the file
         with st.spinner("Extracting data..."):
             try:
-                with zipFile.ZipFile(uploaded_file, 'r') as zip_ref:
+                with zipfile.Zipfile(uploaded_file, 'r') as zip_ref:
                     zip_ref.extractall(temp_dir_path)
             except Exception as e:
                 st.error(f"Error extracting ZIP file: {e}")
@@ -378,5 +378,6 @@ if run_button:
     
     # The temporary directory and all its contents are
     # automatically deleted when the 'with' block ends.
+
 
 
