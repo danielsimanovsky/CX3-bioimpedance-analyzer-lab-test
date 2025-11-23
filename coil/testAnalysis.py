@@ -95,10 +95,10 @@ class ImpedanceAnalyzer:
 
         return f"Successfully created {total_converted} new files (cleaned {len(old_csvs)} old files)."
 
-    def plot_2d_graphs(self, plot_type: str) -> Tuple[plt.Figure, plt.Figure, plt.Figure]:
+    def plot_2d_graphs(self, plot_type: str) -> Tuple[plt.Figure, plt.Figure, plt.Figure, pd.DataFrame, pd.DataFrame]:
         """
         Generates THREE 2D plots for this experiment folder.
-        Returns: (fig_spectrum, fig_max_val_vs_cap, fig_freq_at_max_vs_cap)
+        Returns: (fig_spectrum, fig_max_val_vs_cap, fig_freq_at_max_vs_cap, df_summary, df_spectrum)
         """
         csv_files = sorted(list(self.experiment_dir.rglob("*_nf.csv")))
         if not csv_files:
@@ -170,6 +170,9 @@ class ImpedanceAnalyzer:
         plot_values_at_max = []
         plot_freqs_at_max = []
 
+        # List to store full spectrum data for download
+        spectrum_data_list = []
+
         for i, (cap, freqs, mags, reals, imags, parallel_z) in enumerate(plot_data):
             y_data = None
 
@@ -196,12 +199,37 @@ class ImpedanceAnalyzer:
 
                 # 3. Save Frequency at Max Value (CONVERTED TO MHz)
                 plot_freqs_at_max.append(freqs[max_idx] / 1e6)
+
+                # 4. Collect Data for Download
+                df_temp = pd.DataFrame({
+                    "Frequency (Hz)": freqs,
+                    "Frequency (MHz)": freqs / 1e6,
+                    f"{y_label}": y_data,
+                    "Capacitance (nF)": cap
+                })
+                spectrum_data_list.append(df_temp)
+
             else:
                 plot_values_at_max.append(0)
                 plot_freqs_at_max.append(0)
 
             # Scatter plot for Plot 1 (CONVERTED TO MHz)
             ax1.scatter(freqs / 1e6, y_data, label=f"{cap} nF", color=cmap(i / len(plot_data)), s=10)
+
+        # --- Prepare DataFrames for Return ---
+        # 1. Summary Data (Peak Val, Peak Freq vs Cap)
+        capacitances = [d[0] for d in plot_data]
+        df_summary = pd.DataFrame({
+            "Capacitance (nF)": capacitances,
+            f"Peak {y_label}": plot_values_at_max,
+            f"Frequency at Peak (MHz)": plot_freqs_at_max
+        })
+
+        # 2. Full Spectrum Data
+        if spectrum_data_list:
+            df_spectrum = pd.concat(spectrum_data_list, ignore_index=True)
+        else:
+            df_spectrum = pd.DataFrame()
 
         # --- Plot 1: Spectrum ---
         ax1.set_xlabel("Frequency (MHz)")  # Changed Label
@@ -214,8 +242,6 @@ class ImpedanceAnalyzer:
         fig_z_freq.savefig(self.plot_dir / f"{self.experiment_dir.name}_{plot_type}_vs_Freq.png")
 
         # --- Plot 2: Peak Value vs. Capacitance ---
-        capacitances = [d[0] for d in plot_data]
-
         fig_z_cap = plt.figure(figsize=(7, 5))
         ax2 = fig_z_cap.add_subplot(111)
         ax2.plot(capacitances, plot_values_at_max, 'bo', label=f"Peak Value")
@@ -237,4 +263,5 @@ class ImpedanceAnalyzer:
         fig_freq_cap.tight_layout()
         fig_freq_cap.savefig(self.plot_dir / f"{self.experiment_dir.name}_{plot_type}_FreqAtPeak_vs_Cap.png")
 
-        return (fig_z_freq, fig_z_cap, fig_freq_cap)
+        # Return 3 Figures AND 2 DataFrames
+        return (fig_z_freq, fig_z_cap, fig_freq_cap, df_summary, df_spectrum)

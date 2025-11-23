@@ -31,9 +31,7 @@ st.title("🔬 Impedance Analysis Dashboard (Web Version)")
 st.markdown("Upload a single `.zip` file containing your data folders to begin.")
 
 
-# ---
-# 3D PLOTTING FUNCTIONS
-# ---
+# --- 3D PLOTTING FUNCTIONS (Unchanged) ---
 
 def get_all_csv_data(root_dir: Path, selected_folders: List[str],
                      z_limit: Optional[float], coil_inductance: float
@@ -45,10 +43,6 @@ def get_all_csv_data(root_dir: Path, selected_folders: List[str],
 
     for folder_name in selected_folders:
         exp_path = root_dir / folder_name
-
-        # --- ROBUST DISTANCE/VARIABLE PARSING ---
-        # Try to extract the first number found in the folder name
-        # e.g. "100uH" -> 100.0, "1cm_100uApp" -> 1.0
         match = re.match(r"([0-9.]+)", folder_name)
         if match:
             try:
@@ -56,7 +50,6 @@ def get_all_csv_data(root_dir: Path, selected_folders: List[str],
             except ValueError:
                 distance_val = 0.0
         else:
-            # Fallback if no number is found
             distance_val = 0.0
 
         csv_files = list(exp_path.rglob("*_nf.csv"))
@@ -72,14 +65,11 @@ def get_all_csv_data(root_dir: Path, selected_folders: List[str],
                 df['distance'] = distance_val
                 df['capacitance'] = cap_val
 
-                # --- Create MHz Column for Plotting ---
                 df['frequency_mhz'] = df['frequency[Hz]'] / 1e6
-
                 df['real_z'] = df["Re[Ohm]"]
                 df['imag_z'] = df["Im[Ohm]"]
                 df['magnitude'] = np.sqrt(df["Re[Ohm]"] ** 2 + df["Im[Ohm]"] ** 2)
 
-                # Parallel Z Calc (Safe)
                 C_farad = df['capacitance'] * 1e-9
                 with np.errstate(divide='ignore', invalid='ignore'):
                     safe_freqs = df['frequency[Hz]'] + epsilon
@@ -111,12 +101,12 @@ def plot_3d_distance_plotly(all_data: pd.DataFrame, y_column: str, y_label: str)
     if len(all_data) > 0:
         plot_data = all_data.sample(min(len(all_data), 50000))
         fig.add_trace(go.Scatter3d(
-            x=plot_data['frequency_mhz'], y=plot_data['distance'], z=plot_data[y_column],  # Use MHz
+            x=plot_data['frequency_mhz'], y=plot_data['distance'], z=plot_data[y_column],
             mode="markers", marker=dict(size=2, opacity=0.5, color=plot_data[y_column], colorscale='Viridis'),
             name=y_label
         ))
     fig.update_layout(
-        scene=dict(xaxis=dict(title="Frequency (MHz)", type="log"),  # Changed Label
+        scene=dict(xaxis=dict(title="Frequency (MHz)", type="log"),
                    zaxis=dict(title=y_label, type="log" if y_column in ['magnitude', 'parallel_z'] else 'linear'),
                    yaxis=dict(title="Relative distance/Variable (cm/uH)")),
         title=f"3D {y_label} vs. Frequency vs. Variable",
@@ -127,12 +117,11 @@ def plot_3d_distance_plotly(all_data: pd.DataFrame, y_column: str, y_label: str)
 def plot_min_impedance_vs_distance(all_data: pd.DataFrame, steak_size: float, y_column: str, y_label: str) -> Tuple[
     plt.Figure, pd.DataFrame]:
     min_z_by_dist = all_data.groupby('distance')[y_column].min()
-    # Use frequency_mhz instead of frequency[Hz]
     min_freq_by_dist = all_data.loc[all_data.groupby('distance')[y_column].idxmin()].set_index('distance')[
         'frequency_mhz']
     df_results = pd.DataFrame({
         "Variable": min_z_by_dist.index, f"Min {y_label}": min_z_by_dist.values,
-        "Frequency at Min (MHz)": min_freq_by_dist.loc[min_z_by_dist.index].values  # Changed Column Name
+        "Frequency at Min (MHz)": min_freq_by_dist.loc[min_z_by_dist.index].values
     })
     df_results["Relative Variable"] = df_results["Variable"] / steak_size
     df_results = df_results.sort_values(by="Relative Variable")
@@ -195,9 +184,11 @@ def plot_3d_impedance_vs_capacitance(all_data: pd.DataFrame, steak_size: float, 
     return (fig, df_results)
 
 
-# ---
-# START OF NEW STREAMLIT UI (WEB VERSION)
-# ---
+# --- UI & SESSION STATE LOGIC ---
+
+# Initialize session state for results if it doesn't exist
+if 'analysis_results' not in st.session_state:
+    st.session_state.analysis_results = None
 
 # --- 1. Sidebar Configuration ---
 with st.sidebar:
@@ -208,7 +199,6 @@ with st.sidebar:
     )
 
     st.header("2. Configuration")
-
     st.subheader("Capacitance Settings")
     cap_start = st.number_input("Capacitance Start (nF)", value=0.0, step=0.1, format="%.2f")
     cap_step = st.number_input("Capacitance Step (nF)", value=0.1, step=0.1, min_value=0.01, format="%.2f")
@@ -250,14 +240,22 @@ with st.sidebar:
 
     run_button = st.button(f"**🚀 Run Analysis**")
 
-# --- 4. Main Analysis Area ---
+# --- MAIN LOGIC ---
+
 if not uploaded_file:
     st.info("Please upload your data .zip file using the sidebar to begin.")
+    # Clear results if no file is present
+    st.session_state.analysis_results = None
     st.stop()
 
+# Logic to Run Analysis and Store Results
 if run_button:
+    results_container = {'experiments': {}, 'combined': {}}
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
+
+        # 1. Extract
         with st.spinner("Extracting data..."):
             try:
                 with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
@@ -274,122 +272,125 @@ if run_button:
 
         st.success(f"Data extracted. Found root folder: `{root_dir.name}`")
 
-        # Updated Folder finding logic to just find directories with numbers in them
         try:
             exp_folders = [f for f in root_dir.iterdir() if f.is_dir() and any(char.isdigit() for char in f.name)]
             selected_experiments = sorted([f.name for f in exp_folders])
             if not selected_experiments:
-                st.error(f"No valid experiment folders found in the zip file.");
+                st.error(f"No valid experiment folders found.");
                 st.stop()
         except Exception as e:
-            st.error(f"Could not read experiment folders from zip: {e}");
+            st.error(f"Could not read folders: {e}");
             st.stop()
 
-        # --- Step 1: Conversion & 2D Plots (Loop) ---
-        st.header(f"1. 2D Analysis (Plotting {plot_type_str})")
-
+        # 2. Process 2D Data
         for exp_name in selected_experiments:
-            with st.expander(f"▼ Results for: {exp_name}", expanded=True):
-                exp_path = root_dir / exp_name
-                exp_output_path = temp_dir_path / "results" / exp_name
-                st.markdown(f"**Analyzing:** `{exp_name}`")
+            exp_path = root_dir / exp_name
+            exp_output_path = temp_dir_path / "results" / exp_name
 
-                try:
-                    analyzer = ImpedanceAnalyzer(
-                        experiment_dir=exp_path,
-                        output_dir=exp_output_path,
-                        steak_size=steak_size,
-                        coil_inductance=coil_inductance,
-                        z_limit=z_limit_val
-                    )
+            try:
+                analyzer = ImpedanceAnalyzer(
+                    experiment_dir=exp_path, output_dir=exp_output_path,
+                    steak_size=steak_size, coil_inductance=coil_inductance, z_limit=z_limit_val
+                )
+                analyzer.run_spec_to_csv_conversion(cap_start, cap_step)
 
-                    with st.spinner(f"[{exp_name}] Converting .spec to .csv..."):
-                        status_msg = analyzer.run_spec_to_csv_conversion(cap_start, cap_step)
-                        st.write(f"Conversion complete: {status_msg}")
+                if run_2d_plots:
+                    # Store figures and dataframes
+                    fig1, fig2, fig3, df_sum, df_spec = analyzer.plot_2d_graphs(plot_type_2d)
+                    results_container['experiments'][exp_name] = {
+                        'figs': (fig1, fig2, fig3),
+                        'df_sum': df_sum,
+                        'df_spec': df_spec
+                    }
+            except Exception as e:
+                st.warning(f"Skipped {exp_name}: {e}")
+                continue
 
-                    if run_2d_plots:
-                        st.subheader(f"2D Plots for {exp_name}")
-                        with st.spinner(f"[{exp_name}] Generating 2D plots..."):
-                            # --- UNPACK 3 PLOTS ---
-                            fig_z_freq, fig_z_cap, fig_freq_cap = analyzer.plot_2d_graphs(plot_type_2d)
-
-                            st.pyplot(fig_z_freq)
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.pyplot(fig_z_cap)
-                            with col2:
-                                st.pyplot(fig_freq_cap)
-                            plt.close('all')
-
-                except Exception as e:
-                    st.error(f"Failed to analyze {exp_name}: {e}")
-                    continue
-
-        st.success("2D analysis complete.")
-        st.markdown("---")
-
-        # --- Step 2: 3D Plots (Combined) ---
-        st.header(f"2. 3D & Summary Analysis (Plotting {plot_type_str})")
-
+        # 3. Process 3D/Combined Data
         all_data_df = pd.DataFrame()
         if any([run_3d_dist, run_3d_cap, run_min_z, run_delta_z]):
-            with st.spinner("Loading all data for 3D/Summary plots..."):
-                try:
-                    all_data_df = get_all_csv_data(
-                        root_dir, selected_experiments, z_limit_val, coil_inductance
-                    )
-                    if all_data_df.empty:
-                        st.error("No data found for 3D/Summary plots.")
-                    else:
-                        st.success(f"Loaded {len(all_data_df)} total data points.")
-                except Exception as e:
-                    st.error(f"Failed to load combined data: {e}")
+            try:
+                all_data_df = get_all_csv_data(root_dir, selected_experiments, z_limit_val, coil_inductance)
+            except Exception as e:
+                st.error(f"Error loading combined data: {e}")
 
         if not all_data_df.empty:
+            combined_res = {}
             if run_3d_dist:
-                st.subheader(f"3D {plot_type_str} vs. Variable")
-                with st.spinner("Generating 3D distance plot..."):
-                    try:
-                        fig = plot_3d_distance_plotly(all_data_df, plot_y_column, plot_y_label)
-                        st.plotly_chart(fig, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Could not generate 3D distance plot: {e}")
-
+                combined_res['3d_dist'] = plot_3d_distance_plotly(all_data_df, plot_y_column, plot_y_label)
             if run_min_z:
-                st.subheader(f"Minimum {plot_type_str} vs. Variable")
-                with st.spinner(f"Generating Min {plot_type_str} plot..."):
-                    try:
-                        fig, df = plot_min_impedance_vs_distance(all_data_df, steak_size,
-                                                                 plot_y_column, plot_y_label)
-                        st.pyplot(fig)
-                        with st.expander("View Data"):
-                            st.dataframe(df)
-                    except Exception as e:
-                        st.error(f"Could not generate Min {plot_type_str} plot: {e}")
-
+                combined_res['min_z'] = plot_min_impedance_vs_distance(all_data_df, steak_size, plot_y_column,
+                                                                       plot_y_label)
             if run_delta_z:
-                st.subheader(f"{plot_type_str} Range (Δ) vs. Variable")
-                with st.spinner(f"Generating Δ{plot_type_str} plot..."):
-                    try:
-                        fig, df = plot_impedance_range_vs_distance(all_data_df, steak_size,
-                                                                   plot_y_column, plot_y_label)
-                        st.pyplot(fig)
-                        with st.expander("View Data"):
-                            st.dataframe(df)
-                    except Exception as e:
-                        st.error(f"Could not generate Δ{plot_type_str} plot: {e}")
-
+                combined_res['delta_z'] = plot_impedance_range_vs_distance(all_data_df, steak_size, plot_y_column,
+                                                                           plot_y_label)
             if run_3d_cap:
-                st.subheader(f"3D {plot_type_str} at Resonance vs. Capacitance")
-                with st.spinner(f"Generating 3D capacitance plot..."):
-                    try:
-                        fig, df = plot_3d_impedance_vs_capacitance(all_data_df, steak_size,
-                                                                   plot_y_column, plot_y_label)
-                        st.plotly_chart(fig, use_container_width=True)
-                        with st.expander("View Raw Data"):
-                            st.dataframe(df)
-                    except Exception as e:
-                        st.error(f"Could not generate 3D capacitance plot: {e}")
+                combined_res['3d_cap'] = plot_3d_impedance_vs_capacitance(all_data_df, steak_size, plot_y_column,
+                                                                          plot_y_label)
 
-    st.success(f"🎉 **Full analysis complete!**")
-    st.balloons()
+            results_container['combined'] = combined_res
+
+    # Save to session state
+    st.session_state.analysis_results = results_container
+    st.session_state.plot_type_display = plot_type_str  # Save the label for display
+
+# --- RENDERING RESULTS FROM SESSION STATE ---
+
+if st.session_state.analysis_results:
+    res = st.session_state.analysis_results
+    display_type = st.session_state.get('plot_type_display', plot_type_str)
+
+    # 1. Render 2D Plots
+    st.header(f"1. 2D Analysis (Plotting {display_type})")
+
+    for exp_name, data in res['experiments'].items():
+        with st.expander(f"▼ Results for: {exp_name}", expanded=False):
+            fig1, fig2, fig3 = data['figs']
+
+            st.pyplot(fig1)
+            st.download_button(
+                label=f"📥 Download Spectrum Data ({exp_name})",
+                data=data['df_spec'].to_csv(index=False).encode('utf-8'),
+                file_name=f"{exp_name}_spectrum_data.csv", mime='text/csv', key=f"dl_spec_{exp_name}"
+            )
+
+            col1, col2 = st.columns(2)
+            with col1: st.pyplot(fig2)
+            with col2: st.pyplot(fig3)
+
+            st.download_button(
+                label=f"📥 Download Analysis Data ({exp_name})",
+                data=data['df_sum'].to_csv(index=False).encode('utf-8'),
+                file_name=f"{exp_name}_analysis_summary.csv", mime='text/csv', key=f"dl_sum_{exp_name}"
+            )
+
+    # 2. Render 3D/Combined Plots
+    st.header(f"2. 3D & Summary Analysis (Plotting {display_type})")
+    combined = res.get('combined', {})
+
+    if '3d_dist' in combined:
+        st.subheader(f"3D {display_type} vs. Variable")
+        st.plotly_chart(combined['3d_dist'], use_container_width=True)
+
+    if 'min_z' in combined:
+        fig, df = combined['min_z']
+        st.subheader(f"Minimum {display_type} vs. Variable")
+        st.pyplot(fig)
+        with st.expander("View Data"): st.dataframe(df)
+        st.download_button("📥 Download Min Data", df.to_csv(index=False).encode('utf-8'), "min_data.csv", "text/csv")
+
+    if 'delta_z' in combined:
+        fig, df = combined['delta_z']
+        st.subheader(f"{display_type} Range (Δ) vs. Variable")
+        st.pyplot(fig)
+        with st.expander("View Data"): st.dataframe(df)
+        st.download_button("📥 Download Delta Data", df.to_csv(index=False).encode('utf-8'), "delta_data.csv",
+                           "text/csv")
+
+    if '3d_cap' in combined:
+        fig, df = combined['3d_cap']
+        st.subheader(f"3D {display_type} at Resonance vs. Capacitance")
+        st.plotly_chart(fig, use_container_width=True)
+        with st.expander("View Raw Data"): st.dataframe(df)
+        st.download_button("📥 Download 3D Resonance Data", df.to_csv(index=False).encode('utf-8'), "resonance_data.csv",
+                           "text/csv")
