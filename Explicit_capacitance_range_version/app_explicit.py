@@ -40,13 +40,12 @@ def get_all_csv_data(root_dir: Path, selected_folders: List[str],
                      ) -> pd.DataFrame:
     """Helper to loop through all selected folders and compile CSV data."""
     all_data = []
-    L_henry = coil_inductance * 1e-9  # nH to H
+    L_henry = coil_inductance * 1e-9
     epsilon = 1e-12
 
     for folder_name in selected_folders:
         exp_path = root_dir / folder_name
 
-        # --- ROBUST DISTANCE/VARIABLE PARSING ---
         match = re.match(r"([0-9.]+)", folder_name)
         if match:
             try:
@@ -56,7 +55,6 @@ def get_all_csv_data(root_dir: Path, selected_folders: List[str],
         else:
             distance_val = 0.0
 
-        # Look for _pf.csv now
         csv_files = list(exp_path.rglob("*_pf.csv"))
 
         for file in csv_files:
@@ -76,7 +74,6 @@ def get_all_csv_data(root_dir: Path, selected_folders: List[str],
                 df['imag_z'] = df["Im[Ohm]"]
                 df['magnitude'] = np.sqrt(df["Re[Ohm]"] ** 2 + df["Im[Ohm]"] ** 2)
 
-                # C in Farads (pF -> F)
                 C_farad = df['capacitance'] * 1e-12
                 with np.errstate(divide='ignore', invalid='ignore'):
                     safe_freqs = df['frequency[Hz]'] + epsilon
@@ -108,7 +105,7 @@ def plot_3d_distance_plotly(all_data: pd.DataFrame, y_column: str, y_label: str)
     if len(all_data) > 0:
         plot_data = all_data.sample(min(len(all_data), 50000))
         fig.add_trace(go.Scatter3d(
-            x=plot_data['frequency_mhz'], y=plot_data['distance'], z=plot_data[y_column],  # Use MHz
+            x=plot_data['frequency_mhz'], y=plot_data['distance'], z=plot_data[y_column],
             mode="markers", marker=dict(size=2, opacity=0.5, color=plot_data[y_column], colorscale='Viridis'),
             name=y_label
         ))
@@ -176,7 +173,6 @@ def plot_3d_impedance_vs_capacitance(all_data: pd.DataFrame, steak_size: float, 
             x=group['capacitance'], y=group['Relative Variable'], z=group[y_column],
             mode="lines+markers", marker=dict(size=4), line=dict(width=2),
             name=f"Var: {dist:.2f}",
-            # Updated to pF
             hovertemplate=f"Var: %{{y:.2f}}<br>{y_label}: %{{z:.2f}} Ω<br>Capacitance: %{{x}} pF<extra></extra>"
         ))
     fig.update_layout(
@@ -194,7 +190,6 @@ def plot_3d_impedance_vs_capacitance(all_data: pd.DataFrame, steak_size: float, 
 
 # --- UI & SESSION STATE LOGIC ---
 
-# Initialize session state for results if it doesn't exist
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = None
 
@@ -209,21 +204,16 @@ with st.sidebar:
     st.header("2. Configuration")
 
     st.subheader("Capacitance Settings")
-
-    # --- New Explicit List Input ---
     default_vals = "0,1,2,3,4,5,6,7,8,9,10,100,200,300,400,500,600,700,800,900,1000"
     cap_values_input = st.text_area(
         "Capacitance Values (pF) - Comma Separated",
         value=default_vals,
-        height=100,
-        help="Enter the explicit capacitance values corresponding to your measurements, in order."
+        height=100
     )
-
-    # Parse the input
     try:
         cap_values_list = [float(x.strip()) for x in cap_values_input.split(',') if x.strip()]
     except ValueError:
-        st.error("Invalid format in Capacitance Values. Please use numbers separated by commas.")
+        st.error("Invalid format in Capacitance Values.");
         cap_values_list = []
 
     st.subheader("Physical Settings")
@@ -233,6 +223,9 @@ with st.sidebar:
     st.subheader("Analysis Settings")
     z_limit = st.number_input("Z-Limit (Ohm) (0 for no limit)", min_value=0, value=100000, step=1000)
     z_limit_val = z_limit if z_limit > 0 else None
+
+    # --- New Target Frequency Input ---
+    target_freq_mhz = st.number_input("Target Frequency for Analysis (MHz)", value=1.0, step=0.1, min_value=0.0)
 
     plot_type_str = st.radio(
         "Select Data to Plot:",
@@ -248,7 +241,6 @@ with st.sidebar:
     }
     plot_y_column, plot_y_label, plot_type_2d = plot_type_map[plot_type_str]
 
-    # Validation
     if plot_type_str == '|Z| (Parallel Model)' and coil_inductance <= 0:
         st.error("Coil Inductance must be > 0 to use the Parallel Model.")
         st.stop()
@@ -271,18 +263,14 @@ with st.sidebar:
 
 if not uploaded_file:
     st.info("Please upload your data .zip file using the sidebar to begin.")
-    # Clear results if no file is present
     st.session_state.analysis_results = None
     st.stop()
 
-# Logic to Run Analysis and Store Results
 if run_button:
     results_container = {'experiments': {}, 'combined': {}}
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
-
-        # 1. Extract
         with st.spinner("Extracting data..."):
             try:
                 with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
@@ -309,7 +297,6 @@ if run_button:
             st.error(f"Could not read folders: {e}");
             st.stop()
 
-        # 2. Process 2D Data
         for exp_name in selected_experiments:
             exp_path = root_dir / exp_name
             exp_output_path = temp_dir_path / "results" / exp_name
@@ -319,14 +306,13 @@ if run_button:
                     experiment_dir=exp_path, output_dir=exp_output_path,
                     steak_size=steak_size, coil_inductance=coil_inductance, z_limit=z_limit_val
                 )
-                # Pass the list of capacitance values
                 analyzer.run_spec_to_csv_conversion(cap_values_list)
 
                 if run_2d_plots:
-                    # Store figures and dataframes
-                    fig1, fig2, fig3, df_sum, df_spec = analyzer.plot_2d_graphs(plot_type_2d)
+                    # Pass target frequency to plotting function
+                    fig1, fig2, fig3, fig4, df_sum, df_spec = analyzer.plot_2d_graphs(plot_type_2d, target_freq_mhz)
                     results_container['experiments'][exp_name] = {
-                        'figs': (fig1, fig2, fig3),
+                        'figs': (fig1, fig2, fig3, fig4),
                         'df_sum': df_sum,
                         'df_spec': df_spec
                     }
@@ -334,7 +320,6 @@ if run_button:
                 st.warning(f"Skipped {exp_name}: {e}")
                 continue
 
-        # 3. Process 3D/Combined Data
         all_data_df = pd.DataFrame()
         if any([run_3d_dist, run_3d_cap, run_min_z, run_delta_z]):
             try:
@@ -358,22 +343,21 @@ if run_button:
 
             results_container['combined'] = combined_res
 
-    # Save to session state
     st.session_state.analysis_results = results_container
-    st.session_state.plot_type_display = plot_type_str  # Save the label for display
+    st.session_state.plot_type_display = plot_type_str
 
-# --- RENDERING RESULTS FROM SESSION STATE ---
+# --- RENDERING ---
 
 if st.session_state.analysis_results:
     res = st.session_state.analysis_results
     display_type = st.session_state.get('plot_type_display', plot_type_str)
 
-    # 1. Render 2D Plots
     st.header(f"1. 2D Analysis (Plotting {display_type})")
 
     for exp_name, data in res['experiments'].items():
         with st.expander(f"▼ Results for: {exp_name}", expanded=False):
-            fig1, fig2, fig3 = data['figs']
+            # Unpack 4 figures now
+            fig1, fig2, fig3, fig4 = data['figs']
 
             st.pyplot(fig1)
             st.download_button(
@@ -386,13 +370,15 @@ if st.session_state.analysis_results:
             with col1: st.pyplot(fig2)
             with col2: st.pyplot(fig3)
 
+            # Show the new Target Frequency Plot
+            st.pyplot(fig4)
+
             st.download_button(
                 label=f"📥 Download Analysis Data ({exp_name})",
                 data=data['df_sum'].to_csv(index=False).encode('utf-8'),
                 file_name=f"{exp_name}_analysis_summary.csv", mime='text/csv', key=f"dl_sum_{exp_name}"
             )
 
-    # 2. Render 3D/Combined Plots
     st.header(f"2. 3D & Summary Analysis (Plotting {display_type})")
     combined = res.get('combined', {})
 
